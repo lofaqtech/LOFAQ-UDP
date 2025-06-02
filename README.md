@@ -46,4 +46,4 @@ chmod +x install_lofaq.sh; ./install_lofaq.sh
  
 ## :octocat: Credits
 
-1. [@apernet )
+1. [@apernet & @khaledagn]
