@@ -25,12 +25,12 @@ add_user() {
     read -r username
     echo -e "\e[1;34mEnter password:\e[0m"
     read -r password
-    echo -e "\e[1;34mEnter expiry date (YYYY-MM-DD):\e[0m"
-    read -r expiry
-
-    sqlite3 "$USER_DB" "INSERT INTO users (username, password, expiry) VALUES ('$username', '$password', '$expiry');"
+    echo -e "\e[1;34mEnter account duration in days:\e[0m"
+    read -r days
+    expiry_date=$(date -d "+$days days" +"%Y-%m-%d")
+    sqlite3 "$USER_DB" "INSERT INTO users (username, password, expiry) VALUES ('$username', '$password', '$expiry_date');"
     if [[ $? -eq 0 ]]; then
-        echo -e "\e[1;32mUser $username added successfully (expires: $expiry).\e[0m"
+        echo -e "\e[1;32mUser $username added. Expires on $expiry_date.\e[0m"
         update_userpass_config
         restart_server
     else
@@ -43,8 +43,10 @@ edit_user() {
     read -r username
     echo -e "\e[1;34mEnter new password:\e[0m"
     read -r password
-    echo -e "\e[1;34mEnter new expiry date (YYYY-MM-DD):\e[0m"
-    read -r expiry
+    echo -e "\e[1;34mEnter new duration (in days from today):\e[0m"
+    read -r duration
+
+    expiry=$(date -d "+$duration days" +"%Y-%m-%d")
 
     sqlite3 "$USER_DB" "UPDATE users SET password = '$password', expiry = '$expiry' WHERE username = '$username';"
     if [[ $? -eq 0 ]]; then
@@ -71,10 +73,21 @@ delete_user() {
 
 show_users() {
     echo -e "\n\e[1;34mCurrent users and expiry:\e[0m"
-    printf "%-20s %-12s\n" "Username" "Expiry Date"
-    echo "-----------------------------------------"
-    sqlite3 "$USER_DB" "SELECT username, IFNULL(expiry, 'N/A') FROM users;" | while IFS='|' read -r user expiry; do
-        printf "%-20s %-12s\n" "$user" "$expiry"
+    printf "%-20s %-20s %-15s %-10s\n" "Username" "Password" "Expiry Date" "Days Left"
+    echo "--------------------------------------------------------------------------"
+    sqlite3 "$USER_DB" "SELECT username, password, IFNULL(expiry, 'N/A') FROM users;" | while IFS='|' read -r user pass expiry; do
+        if [[ "$expiry" != "N/A" ]]; then
+            today_epoch=$(date +%s)
+            expiry_epoch=$(date -d "$expiry" +%s 2>/dev/null)
+            if [[ $? -eq 0 && $expiry_epoch -ge $today_epoch ]]; then
+                days_left=$(( (expiry_epoch - today_epoch) / 86400 ))
+            else
+                days_left="Expired"
+            fi
+        else
+            days_left="N/A"
+        fi
+        printf "%-20s %-20s %-15s %-10s\n" "$user" "$pass" "$expiry" "$days_left"
     done
 }
 
