@@ -33,7 +33,7 @@ nano install_lofaq.sh
 chmod +x install_lofaq.sh; ./install_lofaq.sh
 ```
 
-## :octocat: by LOFAQ™
+## :octocat: Follow LOFAQ™
 <ul>
  <li>TELEGRAM CHANNEL: https://t.me/lofaqvps</li>
  <li>FACEBOOK: https://www.facebook.com/lofaqtech</li>
