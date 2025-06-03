@@ -716,6 +716,24 @@ perform_install() {
     setup_ssl
     start_services
     perform_install_manager_script
+    
+    # Install cleaner script for expired users
+    cat << 'EOF' > /usr/local/bin/udp-cleaner.sh
+#!/bin/bash
+USER_DB="/etc/hysteria/udpusers.db"
+if [[ ! -f "$USER_DB" ]]; then
+    echo "User database not found at \$USER_DB"
+    exit 1
+fi
+today=\$(date +"%Y-%m-%d")
+sqlite3 "\$USER_DB" "DELETE FROM users WHERE expiry < '\$today';"
+EOF
+
+    chmod +x /usr/local/bin/udp-cleaner.sh
+
+    # Set up cron job for the cleaner if not already present
+    CRON_JOB="0 0 * * * /usr/local/bin/udp-cleaner.sh >/dev/null 2>&1"
+    ( crontab -l 2>/dev/null | grep -Fv "/usr/local/bin/udp-cleaner.sh" ; echo "$CRON_JOB" ) | crontab -
 
     if [[ -n "$_is_fresh_install" ]]; then
         echo
@@ -724,17 +742,17 @@ perform_install() {
 
         echo
         echo -e "$(tbold)Client app AGN INJECTOR:$(treset)"
-        echo -e "$(tblue)https://play.google.com/store/apps/details?id=com.agn.injector$(treset)"
+        echo -e "$(taoi)https://play.google.com/store/apps/details?id=com.agn.injector$(treset)"
         echo
         echo -e "$(tbold)Special App | Internet Piercer:$(treset)"
-        echo -e "$(tblue)https://play.google.com/store/apps/details?id=com.internet.piercer$(treset)"
+        echo -e "$(taoi)https://play.google.com/store/apps/details?id=com.internet.piercer$(treset)"
         echo
         echo -e "Follow Us!"
         echo
-        echo -e "\t+ Check out our website at $(tblue)https://vps.lofaq.com$(treset)"
-        echo -e "\t+ Follow us on Telegram: $(tblue)https://t.me/lofaqvps$(treset)"
-        echo -e "\t+ Follow us on Facebook: $(tblue)https://facebook.com/lofaqtech$(treset)"
-        echo -e "\t+ Follow us on TikTok: $(tblue)https://facebook.com/lofaqtech$(treset)"
+        echo -e "\t+ Check out our website at $(taoi)https://vps.lofaq.com$(treset)"
+        echo -e "\t+ Follow us on Telegram: $(taoi)https://t.me/lofaqvps$(treset)"
+        echo -e "\t+ Follow us on Facebook: $(taoi)https://facebook.com/lofaqtech$(treset)"
+        echo -e "\t+ Follow us on TikTok: $(taoi)https://facebook.com/lofaqtech$(treset)"
         echo
     else
         restart_running_services
