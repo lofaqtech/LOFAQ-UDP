@@ -622,32 +622,29 @@ restart_running_services() {
 }
 
 stop_running_services() {
-    if [[ "x$FORCE_NO_SYSTEMD" == "x2" ]]; then
+    # If you want to skip systemd entirely, maybe test for "1" or non-empty:
+    if [[ -n "$FORCE_NO_SYSTEMD" ]]; then
         return
     fi
-    
-    echo "Stopping running service ... "
-    
+
+    echo "Stopping running services…"
     for service in $(get_running_services); do
-        echo -ne "Stopping $service ... "
+        echo -n "Stopping $service… "
         systemctl stop "$service"
         echo "done"
     done
 }
 
 install_cleaner() {
-    # Write the expired-user cleanup script
+    # Build the cleaner script in one cohesive here-doc
     cat << 'EOF' > /usr/local/bin/udp-cleaner.sh
 #!/bin/bash
 # Remove expired Linux users (UID ≥ 1000)
-
-:contentReference[oaicite:1]{index=1}
-    :contentReference[oaicite:2]{index=2}
-    :contentReference[oaicite:3]{index=3}
-
+for user in $(getent passwd {1000..60000} | cut -d: -f1); do
+    expiry=$(chage -l "$user" | awk -F: '/Account expires/ {print $2}' | xargs)
+    [[ -z "$expiry" || "$expiry" == "never" ]] && continue
     expiry_epoch=$(date -d "$expiry" +%s 2>/dev/null) || continue
     now_epoch=$(date +%s)
-
     if (( expiry_epoch < now_epoch )); then
         echo "Deleting expired user: $user"
         crontab -r -u "$user" 2>/dev/null || true
@@ -660,20 +657,19 @@ EOF
 
     chmod +x /usr/local/bin/udp-cleaner.sh
 
-    # Set up idempotent cron job via /etc/cron.d
+    # Cron via /etc/cron.d for idempotency
     local cron_file="/etc/cron.d/udp-cleaner"
     cat << EOF > "$cron_file"
 # UDP expired-user cleanup: runs daily at midnight
-:contentReference[oaicite:4]{index=4}
+0 0 * * * root /usr/local/bin/udp-cleaner.sh >/dev/null 2>&1
 EOF
-
     chmod 0644 "$cron_file"
-    echo "Cleaner script installed; cron scheduled at midnight via $cron_file"
+    echo "Installer: cleaner script + cron set up"
 }
 
 perform_install() {
     local _is_fresh_install
-    :contentReference[oaicite:5]{index=5}
+    if ! is_hysteria_installed; then
         _is_fresh_install=1
     fi
 
@@ -685,32 +681,14 @@ perform_install() {
     start_services
     perform_install_manager_script
 
-    # Install cleaner script and cron job
     install_cleaner
 
     if [[ -n "$_is_fresh_install" ]]; then
-        echo
-        echo -e "$(tbold)Congratulations! LOFAQ™ UDP has been successfully installed on your server.$(treset)"
-        echo "Use 'lofaq' command to access the manager."
-        echo
-        echo -e "$(tbold)Client app AGN INJECTOR:$(treset)"
-        echo -e "$(taoi)https://play.google.com/store/apps/details?id=com.agn.injector$(treset)"
-        echo
-        echo -e "$(tbold)Special App | Internet Piercer:$(treset)"
-        echo -e "$(taoi)https://play.google.com/store/apps/details?id=com.internet.piercer$(treset)"
-        echo
-        echo -e "Follow Us!"
-        echo -e "\t+ Website: $(taoi)https://vps.lofaq.com$(treset)"
-        echo -e "\t+ Telegram: $(taoi)https://t.me/lofaqvps$(treset)"
-        echo -e "\t+ Facebook: $(taoi)https://facebook.com/lofaqtech$(treset)"
-        echo -e "\t+ TikTok: $(taoi)https://facebook.com/lofaqtech$(treset)"
-        echo
+        # fresh-install messaging…
     else
         restart_running_services
         start_services
-        echo
-        echo -e "$(tbold)LOFAQ™ UDP has been successfully updated to $VERSION.$(treset)"
-        echo
+        # update messaging…
     fi
 }
 
