@@ -775,7 +775,6 @@ main() {
     check_hysteria_homedir "/var/lib/$HYSTERIA_USER"
     case "$OPERATION" in
         "install")
-            setup_db
             perform_install
             ;;
         "remove")
