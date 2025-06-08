@@ -680,15 +680,33 @@ perform_install() {
     setup_ssl
     start_services
     perform_install_manager_script
-
     install_cleaner
 
     if [[ -n "$_is_fresh_install" ]]; then
-        # fresh-install messaging…
+        echo
+        echo -e "$(tbold)Congratulations! LOFAQ™ UDP has been successfully installed on your server.$(treset)"
+        echo "Use 'lofaq' command to access the manager."
+
+        echo
+        echo -e "$(tbold)Client app AGN INJECTOR:$(treset)"
+        echo -e "$(taoi)https://play.google.com/store/apps/details?id=com.agn.injector$(treset)"
+        echo
+        echo -e "$(tbold)Special App | Internet Piercer:$(treset)"
+        echo -e "$(taoi)https://play.google.com/store/apps/details?id=com.internet.piercer$(treset)"
+        echo
+        echo -e "Follow Us!"
+        echo
+        echo -e "\t+ Check out our website at $(taoi)https://vps.lofaq.com$(treset)"
+        echo -e "\t+ Follow us on Telegram: $(taoi)https://t.me/lofaqvps$(treset)"
+        echo -e "\t+ Follow us on Facebook: $(taoi)https://facebook.com/lofaqtech$(treset)"
+        echo -e "\t+ Follow us on TikTok: $(taoi)https://facebook.com/lofaqtech$(treset)"
+        echo
     else
         restart_running_services
         start_services
-        # update messaging…
+        echo
+        echo -e "$(tbold)LOFAQ™ UDP has been successfully updated to $VERSION.$(treset)"
+        echo
     fi
 }
 
