@@ -2,15 +2,19 @@
 
 CONFIG_DIR="/etc/hysteria"
 CONFIG_FILE="$CONFIG_DIR/config.json"
-USER_DB="$CONFIG_DIR/udpusers.db"
 SYSTEMD_SERVICE="/etc/systemd/system/hysteria-server.service"
 
 mkdir -p "$CONFIG_DIR"
-touch "$USER_DB"
 
 fetch_users() {
     if [[ -f "$USER_DB" ]]; then
-        sqlite3 "$USER_DB" "SELECT username || ':' || password FROM users;" | paste -sd, -
+        local today
+        today=$(date +"%Y-%m-%d")
+        
+        # Fetch users whose expiry is either in the future or NULL (no expiry set)
+        sqlite3 "$USER_DB" \
+            "SELECT username || ':' || password FROM users WHERE (expiry IS NULL OR expiry >= '$today');" \
+            | paste -sd, -
     fi
 }
 
@@ -24,70 +28,50 @@ add_user() {
     echo -e "\n\e[1;34mEnter username:\e[0m"
     read -r username
     echo -e "\e[1;34mEnter password:\e[0m"
-    read -r password
+    read -s -r password
     echo -e "\e[1;34mEnter account duration in days:\e[0m"
     read -r days
-    expiry_date=$(date -d "+$days days" +"%Y-%m-%d")
-    sqlite3 "$USER_DB" "INSERT INTO users (username, password, expiry) VALUES ('$username', '$password', '$expiry_date');"
-    if [[ $? -eq 0 ]]; then
-        echo -e "\e[1;32mUser $username added. Expires on $expiry_date.\e[0m"
-        update_userpass_config
-        restart_server
-    else
-        echo -e "\e[1;31mError: Failed to add user $username.\e[0m"
-    fi
+
+    expiry_date=$(date -d "+$days days" +%s)
+    sudo useradd -m "$username"
+    echo "$username:$password" | sudo chpasswd
+
+    sudo chage -E "$expiry_date" "$username"
+    echo -e "\e[1;32mUser $username added. Expires on $(date -d @$expiry_date).\e[0m"
+    restart_server
 }
 
 edit_user() {
     echo -e "\n\e[1;34mEnter username to edit:\e[0m"
     read -r username
     echo -e "\e[1;34mEnter new password:\e[0m"
-    read -r password
-    echo -e "\e[1;34mEnter new duration (in days from today):\e[0m"
-    read -r duration
+    read -s -r password
+    echo "$username:$password" | sudo chpasswd
 
-    expiry=$(date -d "+$duration days" +"%Y-%m-%d")
-
-    sqlite3 "$USER_DB" "UPDATE users SET password = '$password', expiry = '$expiry' WHERE username = '$username';"
-    if [[ $? -eq 0 ]]; then
-        echo -e "\e[1;32mUser $username updated successfully (expires: $expiry).\e[0m"
-        update_userpass_config
-        restart_server
-    else
-        echo -e "\e[1;31mError: Failed to update user $username.\e[0m"
-    fi
+    echo -e "\e[1;34mEnter new duration (in days):\e[0m"
+    read -r days
+    expiry_date=$(date -d "+$days days" +%s)
+    sudo chage -E "$expiry_date" "$username"
+    echo -e "\e[1;32mUser $username updated successfully. New expiry: $(date -d @$expiry_date)\e[0m"
+    restart_server
 }
 
 delete_user() {
     echo -e "\n\e[1;34mEnter username to delete:\e[0m"
     read -r username
-    sqlite3 "$USER_DB" "DELETE FROM users WHERE username = '$username';"
-    if [[ $? -eq 0 ]]; then
-        echo -e "\e[1;32mUser $username deleted successfully.\e[0m"
-        update_userpass_config
-        restart_server
-    else
-        echo -e "\e[1;31mError: Failed to delete user $username.\e[0m"
-    fi
+    sudo userdel -r "$username"
+    echo -e "\e[1;32mUser $username deleted.\e[0m"
+    restart_server
 }
 
 show_users() {
-    echo -e "\n\e[1;34mCurrent users and expiry:\e[0m"
-    printf "%-20s %-20s %-15s %-10s\n" "Username" "Password" "Expiry Date" "Days Left"
-    echo "--------------------------------------------------------------------------"
-    sqlite3 "$USER_DB" "SELECT username, password, IFNULL(expiry, 'N/A') FROM users;" | while IFS='|' read -r user pass expiry; do
-        if [[ "$expiry" != "N/A" ]]; then
-            today_epoch=$(date +%s)
-            expiry_epoch=$(date -d "$expiry" +%s 2>/dev/null)
-            if [[ $? -eq 0 && $expiry_epoch -ge $today_epoch ]]; then
-                days_left=$(( (expiry_epoch - today_epoch) / 86400 ))
-            else
-                days_left="Expired"
-            fi
-        else
-            days_left="N/A"
-        fi
-        printf "%-20s %-20s %-15s %-10s\n" "$user" "$pass" "$expiry" "$days_left"
+    echo -e "\n\e[1;34mSystem Users with Expiry:\e[0m"
+    printf "%-20s %-20s\n" "Username" "Account Expiry"
+    echo "----------------------------------------"
+
+    getent passwd {1000..60000} | cut -d: -f1 | while read -r user; do
+        expiry=$(sudo chage -l "$user" | grep "Account expires" | cut -d: -f2 | xargs)
+        printf "%-20s %-20s\n" "$user" "$expiry"
     done
 }
 
