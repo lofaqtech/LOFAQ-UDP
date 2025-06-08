@@ -503,6 +503,12 @@ tpl_etc_hysteria_config_json() {
 EOF
 }
 
+fetch_users() {
+    # Return all non-system users (UID 1000–60000) as a comma-separated list
+    getent passwd {1000..60000}               \
+    | cut -d: -f1                             \
+    | paste -sd, -
+}
 
 perform_install_hysteria_binary() {
     if [[ -n "$LOCAL_FILE" ]]; then
