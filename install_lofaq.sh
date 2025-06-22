@@ -505,8 +505,8 @@ EOF
 
 fetch_users() {
     # Return all non-system users (UID 1000–60000) as a comma-separated list
-    getent passwd {1000..60000}               \
-    | cut -d: -f1                             \
+    getent passwd \
+    | awk -F: '$3 >= 1000 && $3 <= 60000 {print $1}' \
     | paste -sd, -
 }
 
