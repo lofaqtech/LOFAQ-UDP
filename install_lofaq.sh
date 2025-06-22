@@ -2,7 +2,7 @@
 #
 # Try `install_lofaq.sh --help` for usage.
 #
-# (c) 2025 LOFAQ™ | By Masamino
+# (c) 2025 LOFAQ™
 #
 
 set -e
@@ -28,6 +28,7 @@ SCRIPT_ARGS=("$@")
 EXECUTABLE_INSTALL_PATH="/usr/local/bin/hysteria"
 SYSTEMD_SERVICES_DIR="/etc/systemd/system"
 CONFIG_DIR="/etc/hysteria"
+USER_DB="$CONFIG_DIR/udpusers.db"
 REPO_URL="https://github.com/apernet/hysteria"
 CONFIG_FILE="$CONFIG_DIR/config.json"
 API_BASE_URL="https://api.github.com/repos/apernet/hysteria"
@@ -35,6 +36,7 @@ CURL_FLAGS=(-L -f -q --retry 5 --retry-delay 10 --retry-max-time 60)
 PACKAGE_MANAGEMENT_INSTALL="${PACKAGE_MANAGEMENT_INSTALL:-}"
 SYSTEMD_SERVICE="$SYSTEMD_SERVICES_DIR/hysteria-server.service"
 mkdir -p "$CONFIG_DIR"
+touch "$USER_DB"
 
 # Other configurations
 OPERATING_SYSTEM=""
@@ -396,6 +398,12 @@ check_environment_grep() {
     fi
 }
 
+check_environment_sqlite3() {
+    if ! has_command sqlite3; then
+        install_software "sqlite3"
+    fi
+}
+
 check_environment_pip() {
     if ! has_command pip; then
         install_software "pip"
@@ -415,6 +423,7 @@ check_environment() {
     check_environment_curl
     check_environment_grep
     check_environment_pip
+    check_environment_sqlite3
     check_environment_jq
 }
 
@@ -503,12 +512,65 @@ tpl_etc_hysteria_config_json() {
 EOF
 }
 
-fetch_users() {
-    # Return all non-system users (UID 1000–60000) as a comma-separated list
-    getent passwd \
-    | awk -F: '$3 >= 1000 && $3 <= 60000 {print $1}' \
-    | paste -sd, -
+
+
+setup_db() {
+    echo "Setting up database"
+    mkdir -p "$(dirname "$USER_DB")"
+
+    if [[ ! -f "$USER_DB" ]]; then
+        sqlite3 "$USER_DB" ".databases"
+        if [[ $? -ne 0 ]]; then
+            echo "Error: Unable to create database file at $USER_DB"
+            exit 1
+        fi
+    fi
+
+    # Create or update the users table with expiry column
+    sqlite3 "$USER_DB" <<EOF
+CREATE TABLE IF NOT EXISTS users (
+    username TEXT PRIMARY KEY,
+    password TEXT NOT NULL,
+    expiry TEXT NOT NULL
+);
+EOF
+
+    # Add expiry column if not exists
+    if ! sqlite3 "$USER_DB" "PRAGMA table_info(users);" | grep -q 'expiry'; then
+        sqlite3 "$USER_DB" "ALTER TABLE users ADD COLUMN expiry TEXT DEFAULT '2099-12-31';"
+    fi
+
+    # Add a default user with expiry
+    default_username="default"
+    default_password="password"
+    default_expiry="2099-12-31"
+    user_exists=$(sqlite3 "$USER_DB" "SELECT username FROM users WHERE username='$default_username';")
+
+    if [[ -z "$user_exists" ]]; then
+        sqlite3 "$USER_DB" "INSERT INTO users (username, password, expiry) VALUES ('$default_username', '$default_password', '$default_expiry');"
+        if [[ $? -eq 0 ]]; then
+            echo "Default user created successfully."
+        else
+            echo "Error: Failed to create default user."
+        fi
+    else
+        echo "Default user already exists."
+    fi
 }
+
+
+
+fetch_users() {
+    DB_PATH="/etc/hysteria/udpusers.db"
+    current_date=$(date +%s)
+    if [[ -f "$DB_PATH" ]]; then
+        sqlite3 "$DB_PATH" "
+            SELECT username || ':' || password FROM users 
+            WHERE strftime('%s', expiry) > $current_date;
+        " | paste -sd, -
+    fi
+}
+
 
 perform_install_hysteria_binary() {
     if [[ -n "$LOCAL_FILE" ]]; then
@@ -628,49 +690,17 @@ restart_running_services() {
 }
 
 stop_running_services() {
-    # If you want to skip systemd entirely, maybe test for "1" or non-empty:
-    if [[ -n "$FORCE_NO_SYSTEMD" ]]; then
+    if [[ "x$FORCE_NO_SYSTEMD" == "x2" ]]; then
         return
     fi
-
-    echo "Stopping running services…"
+    
+    echo "Stopping running service ... "
+    
     for service in $(get_running_services); do
-        echo -n "Stopping $service… "
+        echo -ne "Stopping $service ... "
         systemctl stop "$service"
         echo "done"
     done
-}
-
-install_cleaner() {
-    # Build the cleaner script in one cohesive here-doc
-    cat << 'EOF' > /usr/local/bin/udp-cleaner.sh
-#!/bin/bash
-# Remove expired Linux users (UID ≥ 1000)
-for user in $(getent passwd {1000..60000} | cut -d: -f1); do
-    expiry=$(chage -l "$user" | awk -F: '/Account expires/ {print $2}' | xargs)
-    [[ -z "$expiry" || "$expiry" == "never" ]] && continue
-    expiry_epoch=$(date -d "$expiry" +%s 2>/dev/null) || continue
-    now_epoch=$(date +%s)
-    if (( expiry_epoch < now_epoch )); then
-        echo "Deleting expired user: $user"
-        crontab -r -u "$user" 2>/dev/null || true
-        find /var/spool/cron/atjobs -user "$user" -delete 2>/dev/null || true
-        userdel -r "$user"
-        echo "Cleaned up $user"
-    fi
-done
-EOF
-
-    chmod +x /usr/local/bin/udp-cleaner.sh
-
-    # Cron via /etc/cron.d for idempotency
-    local cron_file="/etc/cron.d/udp-cleaner"
-    cat << EOF > "$cron_file"
-# UDP expired-user cleanup: runs daily at midnight
-0 0 * * * root /usr/local/bin/udp-cleaner.sh >/dev/null 2>&1
-EOF
-    chmod 0644 "$cron_file"
-    echo "Installer: cleaner script + cron set up"
 }
 
 perform_install() {
@@ -686,7 +716,6 @@ perform_install() {
     setup_ssl
     start_services
     perform_install_manager_script
-    install_cleaner
 
     if [[ -n "$_is_fresh_install" ]]; then
         echo
@@ -695,17 +724,17 @@ perform_install() {
 
         echo
         echo -e "$(tbold)Client app AGN INJECTOR:$(treset)"
-        echo -e "$(taoi)https://play.google.com/store/apps/details?id=com.agn.injector$(treset)"
+        echo -e "$(tblue)https://play.google.com/store/apps/details?id=com.agn.injector$(treset)"
         echo
         echo -e "$(tbold)Special App | Internet Piercer:$(treset)"
-        echo -e "$(taoi)https://play.google.com/store/apps/details?id=com.internet.piercer$(treset)"
+        echo -e "$(tblue)https://play.google.com/store/apps/details?id=com.internet.piercer$(treset)"
         echo
         echo -e "Follow Us!"
         echo
-        echo -e "\t+ Check out our website at $(taoi)https://vps.lofaq.com$(treset)"
-        echo -e "\t+ Follow us on Telegram: $(taoi)https://t.me/lofaqvps$(treset)"
-        echo -e "\t+ Follow us on Facebook: $(taoi)https://facebook.com/lofaqtech$(treset)"
-        echo -e "\t+ Follow us on TikTok: $(taoi)https://facebook.com/lofaqtech$(treset)"
+        echo -e "\t+ Check out our website at $(tblue)https://vps.lofaq.com$(treset)"
+        echo -e "\t+ Follow us on Telegram: $(tblue)https://t.me/lofaqvps$(treset)"
+        echo -e "\t+ Follow us on Facebook: $(tblue)https://facebook.com/lofaqtech$(treset)"
+        echo -e "\t+ Follow us on TikTok: $(tblue)https://facebook.com/lofaqtech$(treset)"
         echo
     else
         restart_running_services
@@ -781,6 +810,7 @@ main() {
     check_hysteria_homedir "/var/lib/$HYSTERIA_USER"
     case "$OPERATION" in
         "install")
+            setup_db
             perform_install
             ;;
         "remove")
