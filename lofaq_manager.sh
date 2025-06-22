@@ -7,15 +7,28 @@ SYSTEMD_SERVICE="/etc/systemd/system/hysteria-server.service"
 mkdir -p "$CONFIG_DIR"
 
 fetch_users() {
-    if [[ -f "$USER_DB" ]]; then
-        local today
-        today=$(date +"%Y-%m-%d")
-        
-        # Fetch users whose expiry is either in the future or NULL (no expiry set)
-        sqlite3 "$USER_DB" \
-            "SELECT username || ':' || password FROM users WHERE (expiry IS NULL OR expiry >= '$today');" \
-            | paste -sd, -
-    fi
+    local today_epoch
+    today_epoch=$(date +%s)
+    local users=""
+    
+    # Filter users with UID >= 1000 (non-system)
+    while IFS=: read -r username _ uid _ _ _ _; do
+        if (( uid >= 1000 && uid < 60000 )); then
+            # Get expiry date in YYYY-MM-DD from chage
+            expiry=$(sudo chage -l "$username" | grep "Account expires" | cut -d: -f2- | xargs)
+            if [[ "$expiry" == "never" || -z "$expiry" ]]; then
+                users+="${username},"
+            else
+                expiry_epoch=$(date -d "$expiry" +%s 2>/dev/null)
+                if [[ "$expiry_epoch" -ge "$today_epoch" ]]; then
+                    users+="${username},"
+                fi
+            fi
+        fi
+    done < /etc/passwd
+
+    # Remove trailing comma
+    echo "${users%,}"
 }
 
 update_userpass_config() {
