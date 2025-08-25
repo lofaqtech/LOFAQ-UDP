@@ -22,7 +22,7 @@ THIS IS A SCRIPT FOR AUTO INSTALLATION OF UDP (HYSTERIA SERVER)
 
 // Download the script
 ```
-wget https://github.com/lofaqtech/LOFAQ-UDP/raw/main/install_lofaq.sh
+wget https://raw.githubusercontent.com/lofaqtech/LOFAQ-UDP/raw/main/install_lofaq.sh
 ```
 // Edit script configuration 
 ```
